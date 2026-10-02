@@ -1,0 +1,82 @@
+SimpleFlow 0.191 -- independent Astra review validation
+Date: 2026-10-02
+Baseline: b8b7dcbd3a2a45296c0cc65370ddbe288484e2ba
+
+Environment
+-----------
+Linux x86-64
+Perl 5.38.2, x86_64-linux-gnu-thread-multi
+Data::Printer 1.002001
+Devel::Confess 0.009004
+Devel::Size 0.87
+Test::More 1.302194
+Test::Exception 0.43
+JSON::PP 4.16
+File::Temp 0.2311
+Time::HiRes 1.9775
+Storable 3.32
+
+Original suite
+--------------
+Command: prove -lr t
+Result: PASS
+Files=9, Tests=152, 24 wallclock seconds
+These are the harness's top-level tests/subtests, not a claim that only 152
+individual nested assertions ran. Platform-specific skip blocks were retained.
+
+Desired-behavior regression file
+-------------------------------
+Command: prove -v review/astra/correctness.t
+Result on the unmodified baseline: FAIL (expected)
+Files=1, Tests=11, Failed=11, 2 wallclock seconds
+The tests deliberately assert correct behavior and expose the existing defects.
+They do not change or run as part of t/.
+
+Observed outcomes
+-----------------
+F01 duplicate outputs: neither out nor out.failed remained; failed.outputs
+    nevertheless reported out.failed.
+F01 suffix overlap: the original second output's contents were lost.
+F01 nested output: one reported backup path did not exist; its directory had
+    been renamed after the path was recorded.
+F02 parallel trace: all 16 workers returned records; 16 lines were written;
+    independent runs observed 2 and 4 invalid JSON lines. The test is sensitive
+    to scheduling on the affected code.
+F03 untracked intervening command: later A request skipped and retained B data.
+F04 wrapper argv change: skipped and retained a b|tail instead of a|b|tail.
+F05 threads 1 -> 2: skipped and retained the value 1.
+F06 Unicode path with locking: Wide character in subroutine entry at line 459.
+F07 stream/output overlap: second attempt succeeded, original stream contained
+    second\n only, and the first attempt was moved into a .failed file.
+F08 stderr/output overlap: diagnostic preserved in err.failed, absent from the
+    exception message. The command was a separate script, not inline code
+    containing the diagnostic text.
+F09 scalar-backed STDIN: successful command was followed by a restoration
+    error at line 891; original input was no longer readable.
+F10 pod2text: argument and return-field tables absent. podchecker: syntax OK.
+
+Additional non-primary observations
+----------------------------------
+Ordinary file-backed STDIN with buffered lines retained its next input line.
+UTF-8 byte-string report title was encoded twice; see report's contract caveat.
+No production code or existing test file was changed.
+Process and security concerns P01-P04/S01-S04 were source-reviewed, not run as
+exploit or fault-injection tests.
+
+Published archive
+-----------------
+URL: https://cpan.metacpan.org/authors/id/D/DC/DCON/SimpleFlow-0.191.tar.gz
+Archive SHA-256:
+43e5a233d876c93efcf65173fe90e137de883d33946e1a63d74f488d088f020e
+Module SHA-256:
+8c6c9daeffa29ab84f526dc9ac388d3c2bda4395a4d7572f0137647ff47d1040
+Module matches Git exactly. Every corresponding source-tree file in the
+archive matches. MANIFEST has no missing or unlisted regular files.
+CPAN META.json parses and declares SimpleFlow 0.191 correctly.
+
+Limits
+------
+No alternate Perl runtime, Windows, BSD, interactive terminal, Docker, Podman,
+Apptainer, Singularity, conda, SLURM, or network-filesystem execution was done.
+No end-to-end exploitability claim is made. No other review branch or report
+was read. The source baseline was main only.
