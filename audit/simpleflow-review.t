@@ -293,9 +293,9 @@ subtest 'env values are copied verbatim into log and trace records' => sub {
         );
         close $log;
         close $trace;
-        like(slurp($log), qr/\Q$secret\E/,
+        like(slurp($log_path), qr/\Q$secret\E/,
             'SECURITY FOOTGUN CONFIRMED: explicit env secret appears in the human log');
-        like(slurp($trace), qr/\Q$secret\E/,
+        like(slurp($trace_path), qr/\Q$secret\E/,
             'SECURITY FOOTGUN CONFIRMED: explicit env secret appears in the JSON trace');
     });
 };
@@ -354,6 +354,37 @@ subtest 'parallel jobs>1 cannot return an otherwise accepted CODE-valued note' =
     }
     like($parallel_error, qr/process running it ended before it could return a record|tasks failed/i,
         'CURRENT BUG CONFIRMED: jobs>1 loses the record because Storable cannot serialize CODE');
+};
+
+subtest 'failure cleanup deletes an unrelated pre-existing output.failed directory' => sub {
+    in_fresh_dir(sub {
+        my $out = 'dataset';
+        my $aside = "$out.failed";
+        mkdir $aside or die $!;
+        open my $old, '>', "$aside/valuable-old-data" or die $!;
+        print $old "unrelated\n";
+        close $old;
+
+        my $code = q{
+            mkdir $ARGV[0] or die $!;
+            open my $f, '>', "$ARGV[0]/new-partial" or die $!;
+            print $f "new partial\n";
+            close $f;
+            exit 9;
+        };
+        local $SIG{__WARN__} = sub { };
+        task(
+            cmd          => [$^X, '-e', $code, $out],
+            'output.dir' => $out,
+            die          => 0,
+            quiet        => 1,
+        );
+
+        ok(!-e "$aside/valuable-old-data",
+            'CURRENT DESIGN HAZARD CONFIRMED: unrelated pre-existing .failed content was recursively deleted');
+        ok(-e "$aside/new-partial",
+            'the new failed output replaced the old directory');
+    });
 };
 
 done_testing();
