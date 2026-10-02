@@ -231,4 +231,129 @@ subtest 'timeout destroys the interval part of a caller ITIMER_REAL timer' => su
     }
 };
 
+subtest 'stale.cmd ignores a change from devnull stdin to inherited stdin' => sub {
+    in_fresh_dir(sub {
+        my $out = 'stdin.txt';
+        my $input = 'caller-input.txt';
+        open my $infile, '>', $input or die $!;
+        print $infile "from caller\n";
+        close $infile;
+
+        my $code = q{
+            my $line = <STDIN>;
+            open my $f, '>', $ARGV[0] or die $!;
+            print $f defined($line) ? $line : "EOF\n";
+            close $f;
+        };
+
+        task(
+            cmd           => [$^X, '-e', $code, $out],
+            'output.file' => $out,
+            'stale.cmd'   => 1,
+            stdin         => 'devnull',
+            quiet         => 1,
+        );
+        is(slurp($out), "EOF\n", 'first run saw devnull');
+
+        open my $saved, '<&', \*STDIN or die $!;
+        open STDIN, '<', $input or die $!;
+        my $second = task(
+            cmd           => [$^X, '-e', $code, $out],
+            'output.file' => $out,
+            'stale.cmd'   => 1,
+            stdin         => 'inherit',
+            quiet         => 1,
+        );
+        open STDIN, '<&', $saved or die $!;
+        close $saved;
+
+        is($second->{'cmd.changed'}, 0,
+            'CURRENT BUG CONFIRMED: stdin mode is absent from stale.cmd signature');
+        is($second->{done}, 'before',
+            'CURRENT BUG CONFIRMED: task is skipped after stdin semantics changed');
+        is(slurp($out), "EOF\n",
+            'CURRENT BUG CONFIRMED: output was not rebuilt from inherited stdin');
+    });
+};
+
+subtest 'env values are copied verbatim into log and trace records' => sub {
+    in_fresh_dir(sub {
+        my $log_path = 'run.log';
+        my $trace_path = 'trace.jsonl';
+        open my $log, '>', $log_path or die $!;
+        open my $trace, '>', $trace_path or die $!;
+        my $secret = 'audit-secret-DO-NOT-LOG';
+        task(
+            cmd        => [$^X, '-e', 'exit 0'],
+            env        => { API_TOKEN => $secret },
+            'dry.run'  => 1,
+            'log.fh'   => $log,
+            'trace.fh' => $trace,
+            quiet      => 1,
+        );
+        close $log;
+        close $trace;
+        like(slurp($log), qr/\Q$secret\E/,
+            'SECURITY FOOTGUN CONFIRMED: explicit env secret appears in the human log');
+        like(slurp($trace), qr/\Q$secret\E/,
+            'SECURITY FOOTGUN CONFIRMED: explicit env secret appears in the JSON trace');
+    });
+};
+
+subtest 'array-form command accepts NUL and exec truncates the argument' => sub {
+    local $SIG{__WARN__} = sub { };
+    my $r = task(
+        cmd   => [$^X, '-e', q{print length($ARGV[0])}, "a\0b"],
+        quiet => 1,
+    );
+    is($r->{stdout}, '1',
+        'CURRENT BUG CONFIRMED on POSIX: an accepted argv word containing NUL is truncated by exec');
+};
+
+subtest 'caller output encoding can make successful binary child output fatal during capture' => sub {
+    my $sink = '';
+    open my $encoded, '>:encoding(UTF-8)', \$sink or die $!;
+    my $error = '';
+    {
+        local *STDOUT = $encoded;
+        eval {
+            task(
+                cmd   => [$^X, '-e', q{binmode STDOUT; print STDOUT chr(255)}],
+                quiet => 1,
+            );
+        };
+        $error = $@;
+    }
+    close $encoded;
+    like($error, qr/(?:UTF-8|does not map|read a capture file)/i,
+        'CURRENT BUG CONFIRMED: capture re-applies caller encoding and the task dies on raw byte output');
+};
+
+subtest 'parallel jobs>1 cannot return an otherwise accepted CODE-valued note' => sub {
+    my $serial_error = '';
+    eval {
+        my @r = parallel(
+            jobs  => 1,
+            tasks => [{ cmd => [$^X, '-e', 'exit 0'], note => sub { 1 }, quiet => 1 }],
+        );
+    };
+    $serial_error = $@;
+    is($serial_error, '',
+        'jobs=1 accepts the CODE-valued note because task() does not validate note');
+
+    my $parallel_error = '';
+    {
+        local $SIG{__WARN__} = sub { };
+        eval {
+            my @r = parallel(
+                jobs  => 2,
+                tasks => [{ cmd => [$^X, '-e', 'exit 0'], note => sub { 1 }, quiet => 1 }],
+            );
+        };
+        $parallel_error = $@;
+    }
+    like($parallel_error, qr/process running it ended before it could return a record|tasks failed/i,
+        'CURRENT BUG CONFIRMED: jobs>1 loses the record because Storable cannot serialize CODE');
+};
+
 done_testing();
