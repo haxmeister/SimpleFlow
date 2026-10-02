@@ -18,6 +18,8 @@ jobs:
         with:
           perl-version: '5.40'
       - name: Install runtime dependencies used by SimpleFlow
-        run: cpanm --notest Data::Printer Devel::Confess Devel::Size
+        run: cpanm --notest Data::Printer Devel::Confess Devel::Size Test::Exception
+      - name: Run upstream test suite
+        run: prove -Ilib t/
       - name: Run audit probes
         run: prove -Ilib -v audit/simpleflow-review.t
